@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.cameron-creations/numberbroom-mcp",
+  "description": "Verify US phone numbers: line type, carrier, and TCPA litigator status via the NumberBroom API.",
+  "repository": {
+    "url": "https://github.com/cameron-creations/numberbroom-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://numberbroom.com/developers",
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://numberbroom-mcp.beetrootpro.workers.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Your NumberBroom API key as a Bearer token: \"Bearer nb_live_...\". Get one at https://numberbroom.com/settings.",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

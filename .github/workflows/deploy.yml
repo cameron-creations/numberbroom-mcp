@@ -1,0 +1,72 @@
+name: Deploy to Cloudflare
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+# An in-flight deploy should finish rather than be interrupted half-published;
+# a later push supersedes the pending run instead, same rationale as the main
+# NumberBroom repo's deploy.yml.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run test suite
+        run: npm test
+
+  deploy:
+    name: Deploy worker
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+      # wrangler.jsonc's route is the one line here that matters in
+      # production: a wrong pattern either fails to bind or, worse, shadows
+      # something else on numberbroom.com. Prove the deployed route actually
+      # answers on every deploy rather than at review time. A bare GET is
+      # Method Not Allowed (405) because Streamable HTTP MCP only accepts
+      # POST -- that is the expected, stable signal that the worker is live
+      # and bound to this route, not a Cloudflare 522/1016 for an unbound one.
+      - name: Verify the deployed route responds
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' https://numberbroom.com/mcp)
+          test "$code" = "405" || { echo "expected 405, got $code"; exit 1; }

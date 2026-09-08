@@ -3,6 +3,18 @@
   "name": "numberbroom-mcp",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
+  // Do not expose a workers.dev origin. The first deploy of this worker used
+  // the default one and it happened to resolve under this Cloudflare
+  // account's shared "beetrootpro" vanity subdomain (the same account also
+  // runs numberbroom-chat, mustardsms and others) -- so a NumberBroom product
+  // URL was publishing a different, unrelated brand name in developers.html,
+  // llms.txt and the MCP registry manifest. A custom route on numberbroom.com
+  // fixes that and matches the pattern workers/chat/wrangler.toml already
+  // uses in the main repo for the same reason.
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "numberbroom.com/mcp", "zone_name": "numberbroom.com" }
+  ],
   "observability": {
     "enabled": true
   }

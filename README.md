@@ -25,9 +25,9 @@ this wraps.
 
 ## Connect a client
 
-Add this server as a remote MCP connection using its deployed URL
-(`https://numberbroom-mcp.<your-subdomain>.workers.dev/mcp` once deployed, or run it locally —
-see below) with your NumberBroom API key as a Bearer token in the `Authorization` header:
+Add this server as a remote MCP connection using its deployed URL,
+`https://numberbroom.com/mcp`, with your NumberBroom API key as a Bearer token in the
+`Authorization` header:
 
 ```
 Authorization: Bearer nb_live_YOUR_KEY

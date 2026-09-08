@@ -11,7 +11,7 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://numberbroom-mcp.beetrootpro.workers.dev/mcp",
+      "url": "https://numberbroom.com/mcp",
       "headers": [
         {
           "name": "Authorization",

@@ -56,6 +56,51 @@ function jsonResult(summary: string, data: unknown): CallToolResult {
   };
 }
 
+/**
+ * Exported separately from tool registration so tests can call it directly
+ * with a mocked global fetch, without simulating a full MCP JSON-RPC
+ * handshake. Behavior is unchanged from before this was extracted.
+ */
+export async function verifyPhoneNumber(
+  authHeader: string | null,
+  phone: string
+): Promise<CallToolResult> {
+  if (!authHeader) return NO_AUTH_RESULT;
+
+  const resp = await fetch(`${API_BASE}/verify`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: authHeader },
+    body: JSON.stringify({ phone }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) return errorResult(resp.status, data);
+
+  const d = data as Record<string, unknown>;
+  const summary = d.valid
+    ? `${d.e164}: ${d.lineType}${d.carrier ? ` on ${d.carrier}` : ""}${
+        d.isLitigator ? " — FLAGGED as a known TCPA litigator" : ""
+      }. Charged $${d.charged}.`
+    : `"${phone}" is not a parsable US phone number. Not charged.`;
+  return jsonResult(summary, data);
+}
+
+/** See verifyPhoneNumber's comment — same reason this is a standalone export. */
+export async function getCreditBalance(authHeader: string | null): Promise<CallToolResult> {
+  if (!authHeader) return NO_AUTH_RESULT;
+
+  const resp = await fetch(`${API_BASE}/credits`, {
+    headers: { authorization: authHeader },
+  });
+  const data = await resp.json();
+  if (!resp.ok) return errorResult(resp.status, data);
+
+  const d = data as Record<string, unknown>;
+  return jsonResult(
+    `$${d.credits} remaining — enough for about ${d.lookupsRemaining} lookups at $${d.ratePerLookup} each.`,
+    data
+  );
+}
+
 function createServer(ctx: McpRequestContext): McpServer {
   const server = new McpServer({ name: "numberbroom", version: "1.0.0" });
   const authHeader = ctx.requestInfo?.headers.get("authorization") ?? null;
@@ -77,25 +122,7 @@ function createServer(ctx: McpRequestContext): McpServer {
           .describe("The phone number to verify, in any common US format (e.g. \"(555) 123-4567\")."),
       },
     },
-    async ({ phone }): Promise<CallToolResult> => {
-      if (!authHeader) return NO_AUTH_RESULT;
-
-      const resp = await fetch(`${API_BASE}/verify`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: authHeader },
-        body: JSON.stringify({ phone }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) return errorResult(resp.status, data);
-
-      const d = data as Record<string, unknown>;
-      const summary = d.valid
-        ? `${d.e164}: ${d.lineType}${d.carrier ? ` on ${d.carrier}` : ""}${
-            d.isLitigator ? " — FLAGGED as a known TCPA litigator" : ""
-          }. Charged $${d.charged}.`
-        : `"${phone}" is not a parsable US phone number. Not charged.`;
-      return jsonResult(summary, data);
-    }
+    ({ phone }) => verifyPhoneNumber(authHeader, phone)
   );
 
   server.registerTool(
@@ -106,21 +133,7 @@ function createServer(ctx: McpRequestContext): McpServer {
         "account. Free to call — does not spend credits.",
       inputSchema: {},
     },
-    async (): Promise<CallToolResult> => {
-      if (!authHeader) return NO_AUTH_RESULT;
-
-      const resp = await fetch(`${API_BASE}/credits`, {
-        headers: { authorization: authHeader },
-      });
-      const data = await resp.json();
-      if (!resp.ok) return errorResult(resp.status, data);
-
-      const d = data as Record<string, unknown>;
-      return jsonResult(
-        `$${d.credits} remaining — enough for about ${d.lookupsRemaining} lookups at $${d.ratePerLookup} each.`,
-        data
-      );
-    }
+    () => getCreditBalance(authHeader)
   );
 
   return server;

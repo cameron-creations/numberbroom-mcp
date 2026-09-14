@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import worker, { verifyPhoneNumber, getCreditBalance, wantsHtml, DOCS_URL } from "../src/index";
+import worker, { verifyPhoneNumber, getCreditBalance, wantsHtml, DOCS_URL, CLIENT_HEADER } from "../src/index";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 
 afterEach(() => {
@@ -210,5 +210,61 @@ describe("browser GET on /mcp", () => {
     const res = await worker.fetch(new Request(url, { headers: { accept: "*/*" } }), {}, ctx);
     expect(res.status).not.toBe(302);
     expect(res.status).toBe(405);
+  });
+});
+
+describe("upstream that does not answer in JSON", () => {
+  const html502 = () =>
+    new Response("<html><body>502 Bad Gateway</body></html>", {
+      status: 502,
+      headers: { "content-type": "text/html" },
+    });
+
+  it("verify: an HTML error page becomes a clean tool error, not a thrown parse error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => html502()));
+    const result = await verifyPhoneNumber("Bearer nb_live_test", "5551234567");
+    expect(result.isError).toBe(true);
+    expect(textAt(result)).toContain("HTTP 502");
+    expect(textAt(result)).not.toMatch(/not charged/i);
+  });
+
+  it("verify: a 200 that is not JSON is still an error, never a success", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<!doctype html>", { status: 200 })));
+    const result = await verifyPhoneNumber("Bearer nb_live_test", "5551234567");
+    expect(result.isError).toBe(true);
+    expect(textAt(result)).toContain("HTTP 200");
+  });
+
+  it("credits: an HTML error page becomes a clean tool error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => html502()));
+    const result = await getCreditBalance("Bearer nb_live_test");
+    expect(result.isError).toBe(true);
+    expect(textAt(result)).toContain("HTTP 502");
+  });
+
+  it("a network failure becomes a clean tool error on both tools", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
+    for (const result of [
+      await verifyPhoneNumber("Bearer nb_live_test", "5551234567"),
+      await getCreditBalance("Bearer nb_live_test"),
+    ]) {
+      expect(result.isError).toBe(true);
+      expect(textAt(result)).toContain("Could not reach");
+    }
+  });
+});
+
+describe("calls identify themselves as MCP", () => {
+  it("both tools send the client header the API uses for the MCP daily default", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ credits: 1, ratePerLookup: 0.2, lookupsRemaining: 5 }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await getCreditBalance("Bearer nb_live_test");
+    await verifyPhoneNumber("Bearer nb_live_test", "5551234567");
+    for (const call of fetchMock.mock.calls as unknown as [string, RequestInit][]) {
+      expect((call[1].headers as Record<string, string>)[CLIENT_HEADER]).toBe("mcp");
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

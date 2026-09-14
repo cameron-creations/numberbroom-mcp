@@ -60,10 +60,13 @@ authenticated via `wrangler login`.
 Every tool call here is a direct, unmodified pass-through to NumberBroom's own `/api/v1`
 endpoints. That means:
 
-- Auth, rate limiting (5,000 lookups/key/day), the circuit breaker, and billing are all
+- Auth, rate limiting (5,000 lookups per key per day at most, and 500 for calls through this server
+  unless the key has its own limit set in Settings), the circuit breaker, and billing are all
   enforced exactly once, by NumberBroom's own API — this server does not duplicate or
   second-guess any of it.
 - A number that fails to parse costs nothing, same as calling the REST API directly.
+- An upstream error page or network failure comes back to the agent as a plain tool error, never
+  a thrown exception.
 - This server never sees or stores your API key beyond the lifetime of a single request; each
   MCP tool call constructs an isolated server instance with no shared state between callers.
 

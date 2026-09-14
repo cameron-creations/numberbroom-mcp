@@ -22,6 +22,69 @@ import { z } from "zod";
 
 const API_BASE = "https://numberbroom.com/api/v1";
 
+/**
+ * Tells the API a call came through MCP, so a key with no limit of its own
+ * gets the lower MCP daily default rather than the full per-key cap (see
+ * effectiveDailyLimit in the main repo's api/v1.js). Spoofing it can only
+ * lower the caller's own limit, never raise it, so it needs no signature.
+ */
+export const CLIENT_HEADER = "x-numberbroom-client";
+export const CLIENT_NAME = "mcp";
+
+/**
+ * Upstream answered, but not with JSON: a Cloudflare or Firebase error page,
+ * a 502 from Cloud Run mid-deploy. Before this, `resp.json()` threw and the
+ * agent saw a parser exception. It deliberately does not claim the call was
+ * free -- if the request reached the API before failing, the API refunds a
+ * failed lookup itself; if it did not, nothing was taken -- so the honest
+ * pointer is the free balance check.
+ */
+function unexpectedResult(status: number): CallToolResult {
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text:
+          `NumberBroom's API returned an unexpected response (HTTP ${status}). This is ` +
+          "usually brief; try again shortly. get_credit_balance is free if you want to " +
+          "confirm your balance.",
+      },
+    ],
+  };
+}
+
+const UNREACHABLE_RESULT: CallToolResult = {
+  isError: true,
+  content: [
+    {
+      type: "text",
+      text:
+        "Could not reach NumberBroom's API. Try again shortly; get_credit_balance is free if " +
+        "you want to confirm your balance.",
+    },
+  ],
+};
+
+/** fetch that turns a network failure into null instead of a throw. */
+async function forward(url: string, init: RequestInit): Promise<Response | null> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    return null;
+  }
+}
+
+/** Parses a body as JSON, or returns undefined when it is not JSON. */
+async function readJson(resp: Response): Promise<unknown> {
+  const text = await resp.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 const NO_AUTH_RESULT: CallToolResult = {
   isError: true,
   content: [
@@ -67,12 +130,18 @@ export async function verifyPhoneNumber(
 ): Promise<CallToolResult> {
   if (!authHeader) return NO_AUTH_RESULT;
 
-  const resp = await fetch(`${API_BASE}/verify`, {
+  const resp = await forward(`${API_BASE}/verify`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: authHeader },
+    headers: {
+      "content-type": "application/json",
+      authorization: authHeader,
+      [CLIENT_HEADER]: CLIENT_NAME,
+    },
     body: JSON.stringify({ phone }),
   });
-  const data = await resp.json();
+  if (!resp) return UNREACHABLE_RESULT;
+  const data = await readJson(resp);
+  if (data === undefined || data === null || typeof data !== "object") return unexpectedResult(resp.status);
   if (!resp.ok) return errorResult(resp.status, data);
 
   const d = data as Record<string, unknown>;
@@ -88,10 +157,12 @@ export async function verifyPhoneNumber(
 export async function getCreditBalance(authHeader: string | null): Promise<CallToolResult> {
   if (!authHeader) return NO_AUTH_RESULT;
 
-  const resp = await fetch(`${API_BASE}/credits`, {
-    headers: { authorization: authHeader },
+  const resp = await forward(`${API_BASE}/credits`, {
+    headers: { authorization: authHeader, [CLIENT_HEADER]: CLIENT_NAME },
   });
-  const data = await resp.json();
+  if (!resp) return UNREACHABLE_RESULT;
+  const data = await readJson(resp);
+  if (data === undefined || data === null || typeof data !== "object") return unexpectedResult(resp.status);
   if (!resp.ok) return errorResult(resp.status, data);
 
   const d = data as Record<string, unknown>;

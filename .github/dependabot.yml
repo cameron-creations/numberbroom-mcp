@@ -1,0 +1,10 @@
+# Keeps the SHA-pinned actions in .github/workflows current. A pinned action
+# never moves on its own, which is the point, but it also never picks up a
+# security fix unless something proposes the bump. master is protected, so
+# each bump arrives as a PR that must pass CI.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

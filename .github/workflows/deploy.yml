@@ -70,3 +70,10 @@ jobs:
         run: |
           code=$(curl -s -o /dev/null -w '%{http_code}' https://numberbroom.com/mcp)
           test "$code" = "405" || { echo "expected 405, got $code"; exit 1; }
+
+      # A browser asking for HTML is not an MCP client and gets the setup page
+      # on numberbroom.com instead of the 405 -- see wantsHtml() in src/index.ts.
+      - name: Verify a browser is sent to the setup page
+        run: |
+          loc=$(curl -s -o /dev/null -w '%{redirect_url}' -H 'Accept: text/html' https://numberbroom.com/mcp)
+          test "$loc" = "https://numberbroom.com/mcp-server" || { echo "expected redirect to /mcp-server, got '$loc'"; exit 1; }

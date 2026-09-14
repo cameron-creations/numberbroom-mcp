@@ -6,8 +6,8 @@
     "url": "https://github.com/cameron-creations/numberbroom-mcp",
     "source": "github"
   },
-  "websiteUrl": "https://numberbroom.com/developers",
-  "version": "1.0.0",
+  "websiteUrl": "https://numberbroom.com/mcp-server",
+  "version": "1.0.1",
   "remotes": [
     {
       "type": "streamable-http",

@@ -73,7 +73,20 @@ jobs:
 
       # A browser asking for HTML is not an MCP client and gets the setup page
       # on numberbroom.com instead of the 405 -- see wantsHtml() in src/index.ts.
+      #
+      # Retried, because a new version takes seconds to reach the edge. The
+      # first run of this check (2026-09-14, cee4ca7) fired ~1s after wrangler
+      # returned, got the previous version's plain 405 and an empty redirect,
+      # and failed a deploy that was in fact live a moment later. The 405 check
+      # above cannot see this race: old and new code both answer 405 there.
       - name: Verify a browser is sent to the setup page
         run: |
-          loc=$(curl -s -o /dev/null -w '%{redirect_url}' -H 'Accept: text/html' https://numberbroom.com/mcp)
-          test "$loc" = "https://numberbroom.com/mcp-server" || { echo "expected redirect to /mcp-server, got '$loc'"; exit 1; }
+          for i in $(seq 1 12); do
+            loc=$(curl -s -o /dev/null -w '%{redirect_url}' -H 'Accept: text/html' https://numberbroom.com/mcp)
+            if [ "$loc" = "https://numberbroom.com/mcp-server" ]; then
+              echo "redirect live after attempt $i"; exit 0
+            fi
+            echo "attempt $i: got '$loc', waiting for the new version to propagate"
+            sleep 5
+          done
+          echo "expected redirect to /mcp-server after 60s, last got '$loc'"; exit 1

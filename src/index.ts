@@ -102,7 +102,7 @@ export async function getCreditBalance(authHeader: string | null): Promise<CallT
 }
 
 function createServer(ctx: McpRequestContext): McpServer {
-  const server = new McpServer({ name: "numberbroom", version: "1.0.0" });
+  const server = new McpServer({ name: "numberbroom", version: "1.0.1" });
   const authHeader = ctx.requestInfo?.headers.get("authorization") ?? null;
 
   server.registerTool(

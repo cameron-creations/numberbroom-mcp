@@ -7,7 +7,7 @@
     "source": "github"
   },
   "websiteUrl": "https://numberbroom.com/mcp-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "remotes": [
     {
       "type": "streamable-http",

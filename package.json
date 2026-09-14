@@ -1,6 +1,6 @@
 {
   "name": "numberbroom-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Remote MCP server for the NumberBroom phone verification API — lets AI agents check phone line type, carrier, and TCPA litigator status.",
   "private": true,
   "type": "module",

@@ -1,7 +1,7 @@
 # NumberBroom MCP Server
 
-A remote [MCP](https://modelcontextprotocol.io) server that lets AI agents (Claude, ChatGPT,
-and other MCP-compatible clients) verify US phone numbers through the
+A remote [MCP](https://modelcontextprotocol.io) server that lets AI agents (Claude Code, Cursor,
+Claude Desktop and other MCP clients that can send an Authorization header) verify US phone numbers through the
 [NumberBroom](https://numberbroom.com) API: carrier-level line type, carrier name, an activity
 score, and TCPA litigator status.
 
@@ -33,8 +33,9 @@ Add this server as a remote MCP connection using its deployed URL,
 Authorization: Bearer nb_live_YOUR_KEY
 ```
 
-Exactly how you set that header depends on the client — most MCP-capable apps that support
-remote servers let you add a custom header per connection.
+Step-by-step setup for Claude Code, Cursor, Claude Desktop, ChatGPT and other clients, with
+copy-paste config for each, is at [numberbroom.com/mcp-server](https://numberbroom.com/mcp-server).
+Opening `https://numberbroom.com/mcp` in a browser redirects there; MCP clients are unaffected.
 
 ## Local development
 

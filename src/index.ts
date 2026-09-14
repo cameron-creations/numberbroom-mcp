@@ -139,8 +139,27 @@ function createServer(ctx: McpRequestContext): McpServer {
   return server;
 }
 
+/**
+ * Where a person lands. `/mcp` is the machine endpoint, and Streamable HTTP
+ * answers a plain browser GET with 405 -- which is what anyone clicking the
+ * URL out of llms.txt, the MCP registry or a chat answer used to see. A
+ * request that asks for HTML and not for an event stream is a browser, not
+ * an MCP client, so it is sent to the setup page instead. MCP clients open
+ * the SSE stream with `Accept: text/event-stream` and POST everything else,
+ * so neither path is touched; curl's default `Accept: *\/*` still gets the
+ * 405 that deploy.yml's route check relies on.
+ */
+export const DOCS_URL = "https://numberbroom.com/mcp-server";
+
+export function wantsHtml(request: Request): boolean {
+  if (request.method !== "GET") return false;
+  const accept = request.headers.get("accept") ?? "";
+  return accept.includes("text/html") && !accept.includes("text/event-stream");
+}
+
 export default {
   fetch(request: Request, env: unknown, ctx: ExecutionContext) {
+    if (wantsHtml(request)) return Response.redirect(DOCS_URL, 302);
     return createMcpHandler(createServer)(request, env, ctx);
   },
 } satisfies ExportedHandler;

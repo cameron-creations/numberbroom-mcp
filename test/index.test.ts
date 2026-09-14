@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { verifyPhoneNumber, getCreditBalance } from "../src/index";
+import worker, { verifyPhoneNumber, getCreditBalance, wantsHtml, DOCS_URL } from "../src/index";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 
 afterEach(() => {
@@ -176,5 +176,39 @@ describe("getCreditBalance", () => {
     expect(result.isError).toBe(true);
     expect(textAt(result)).toContain("HTTP 401");
     expect(textAt(result)).toContain("Invalid or revoked API key");
+  });
+});
+
+describe("browser GET on /mcp", () => {
+  const url = "https://numberbroom.com/mcp";
+  const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+
+  it("sends a browser (Accept: text/html) to the setup page", async () => {
+    const res = await worker.fetch(
+      new Request(url, { headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } }),
+      {},
+      ctx
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(DOCS_URL);
+    expect(DOCS_URL).toBe("https://numberbroom.com/mcp-server");
+  });
+
+  it("does not redirect an MCP client opening the event stream", () => {
+    expect(wantsHtml(new Request(url, { headers: { accept: "text/event-stream" } }))).toBe(false);
+    // A client that lists both is asking for the stream; the page is the fallback, not the answer.
+    expect(wantsHtml(new Request(url, { headers: { accept: "text/html, text/event-stream" } }))).toBe(false);
+  });
+
+  it("does not redirect a POST, whatever it accepts", () => {
+    expect(
+      wantsHtml(new Request(url, { method: "POST", headers: { accept: "text/html" }, body: "{}" }))
+    ).toBe(false);
+  });
+
+  it("keeps the bare GET (curl's Accept: */*) on the MCP handler, which deploy.yml checks for 405", async () => {
+    const res = await worker.fetch(new Request(url, { headers: { accept: "*/*" } }), {}, ctx);
+    expect(res.status).not.toBe(302);
+    expect(res.status).toBe(405);
   });
 });

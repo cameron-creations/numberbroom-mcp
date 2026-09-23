@@ -3,7 +3,7 @@
 A remote [MCP](https://modelcontextprotocol.io) server that lets AI agents (Claude Code, Cursor,
 Claude Desktop and other MCP clients that can send an Authorization header) verify US phone numbers through the
 [NumberBroom](https://numberbroom.com) API: carrier-level line type, carrier name, an activity
-score, and TCPA litigator status.
+score with a likely-disconnected flag, and TCPA litigator status.
 
 This server is a thin, stateless proxy. It has no database and runs no OAuth flow — it forwards
 your NumberBroom API key straight through to `https://numberbroom.com/api/v1`, which already

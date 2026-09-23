@@ -147,6 +147,11 @@ export async function verifyPhoneNumber(
   const d = data as Record<string, unknown>;
   const summary = d.valid
     ? `${d.e164}: ${d.lineType}${d.carrier ? ` on ${d.carrier}` : ""}${
+        // A dead mobile still reports lineType "mobile"; disconnection is its
+        // own field, derived from the activity score. Without this the summary
+        // an agent reads first calls a dead line a plain mobile.
+        d.isLikelyDisconnected === true ? `, likely disconnected (activity score ${d.activityScore})` : ""
+      }${
         d.isLitigator ? " — FLAGGED as a known TCPA litigator" : ""
       }. Charged $${d.charged}.`
     : `"${phone}" is not a parsable US phone number. Not charged.`;
@@ -181,7 +186,9 @@ function createServer(ctx: McpRequestContext): McpServer {
     {
       description:
         "Verify a single US phone number: carrier-level line type (mobile, landline, VoIP, " +
-        "disconnected), carrier name, an activity score, and whether the number is a known " +
+        "toll-free or other), carrier name, an activity score with a likely-disconnected flag " +
+        "(a dead mobile still reports as mobile, so read isLikelyDisconnected, not lineType), " +
+        "and whether the number is a known " +
         "TCPA litigator. Does not check Do Not Call registries. Costs $0.20, charged against " +
         "the caller's NumberBroom API credit balance — a number that fails to parse as a " +
         "phone number is not charged. Get an API key at https://numberbroom.com/settings.",

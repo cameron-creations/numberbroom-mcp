@@ -60,7 +60,37 @@ describe("verifyPhoneNumber", () => {
     );
     expect(result.isError).toBeUndefined();
     expect(textAt(result)).toContain("mobile on Verizon Wireless");
+    expect(textAt(result)).not.toContain("disconnected");
     expect(textAt(result)).toContain("Charged $0.2.");
+  });
+
+  it("says a likely-disconnected mobile is likely disconnected", async () => {
+    // The provider has no "disconnected" line type: a dead mobile still
+    // reports "mobile", and only isLikelyDisconnected says otherwise.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            e164: "+15551234567",
+            valid: true,
+            lineType: "mobile",
+            carrier: "Verizon Wireless",
+            isLitigator: false,
+            activityScore: 12,
+            isLikelyDisconnected: true,
+            outcome: "disconnected",
+            keep: false,
+            charged: 0.2,
+          }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const result = await verifyPhoneNumber("Bearer nb_live_test", "5551234567");
+
+    expect(textAt(result)).toContain("mobile on Verizon Wireless, likely disconnected (activity score 12)");
   });
 
   it("flags a known TCPA litigator in the summary", async () => {

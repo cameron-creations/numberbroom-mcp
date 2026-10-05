@@ -1,13 +1,13 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.cameron-creations/numberbroom-mcp",
-  "description": "Verify US phone numbers: line type, carrier, and TCPA litigator status via the NumberBroom API.",
+  "description": "Verify US phone numbers: line type, carrier, and TCPA litigator status via the NumberBroom API. Sign in with OAuth or use an API key.",
   "repository": {
     "url": "https://github.com/cameron-creations/numberbroom-mcp",
     "source": "github"
   },
   "websiteUrl": "https://numberbroom.com/mcp-server",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "remotes": [
     {
       "type": "streamable-http",
@@ -15,8 +15,8 @@
       "headers": [
         {
           "name": "Authorization",
-          "description": "Your NumberBroom API key as a Bearer token: \"Bearer nb_live_...\". Get one at https://numberbroom.com/settings.",
-          "isRequired": true,
+          "description": "Optional: your NumberBroom API key as a Bearer token: \"Bearer nb_live_...\". Clients that sign in with OAuth do not need it. Get one at https://numberbroom.com/settings.",
+          "isRequired": false,
           "isSecret": true
         }
       ]

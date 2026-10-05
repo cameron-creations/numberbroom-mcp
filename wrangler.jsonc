@@ -12,9 +12,35 @@
   // fixes that and matches the pattern workers/chat/wrangler.toml already
   // uses in the main repo for the same reason.
   "workers_dev": false,
+  // global_fetch_strictly_public is what lets the OAuth library accept Client
+  // ID Metadata Documents (CIMD): it fetches a client's document from the
+  // public internet only. It also sends this Worker's own calls to
+  // numberbroom.com/api through the zone's front door rather than straight to
+  // origin. The zone had no WAF custom rules, rate-limit rules or Bot Fight
+  // Mode when this was set (2026-10-04); Browser Integrity Check is on, which
+  // is why every upstream call names USER_AGENT.
+  "compatibility_flags": ["global_fetch_strictly_public"],
+  // Exact routes only. A /.well-known/* wildcard would swallow the agent
+  // discovery files Firebase serves (api-catalog, mcp/server-card.json,
+  // agent-skills), and anything under /oauth/* that is not listed here does
+  // not exist. Revocation is served on the token endpoint, so there is no
+  // /oauth/revoke, and there is no registration endpoint (CIMD only).
   "routes": [
-    { "pattern": "numberbroom.com/mcp", "zone_name": "numberbroom.com" }
+    { "pattern": "numberbroom.com/mcp", "zone_name": "numberbroom.com" },
+    { "pattern": "numberbroom.com/.well-known/oauth-protected-resource/mcp", "zone_name": "numberbroom.com" },
+    { "pattern": "numberbroom.com/.well-known/oauth-authorization-server", "zone_name": "numberbroom.com" },
+    { "pattern": "numberbroom.com/oauth/authorize", "zone_name": "numberbroom.com" },
+    { "pattern": "numberbroom.com/oauth/callback", "zone_name": "numberbroom.com" },
+    { "pattern": "numberbroom.com/oauth/token", "zone_name": "numberbroom.com" }
   ],
+  // Grants, tokens and in-flight consent for @cloudflare/workers-oauth-provider.
+  // Tokens and codes are stored only as hashes; a grant's props (the
+  // connector key) are encrypted with a key only the token holder can unwrap.
+  "kv_namespaces": [
+    { "binding": "OAUTH_KV", "id": "53197fd2679641398669d4625c21b540" }
+  ],
+  // MCP_INTERNAL_SECRET is a wrangler secret (shared with NumberBroom's API,
+  // where it lives in Secret Manager). It is never in this file.
   "observability": {
     "enabled": true
   }

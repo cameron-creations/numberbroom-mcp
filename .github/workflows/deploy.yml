@@ -65,34 +65,35 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
 
-      # wrangler.jsonc's route is the one line here that matters in
-      # production: a wrong pattern either fails to bind or, worse, shadows
-      # something else on numberbroom.com. Prove the deployed route actually
-      # answers on every deploy rather than at review time. A bare GET is
-      # Method Not Allowed (405) because Streamable HTTP MCP only accepts
-      # POST -- that is the expected, stable signal that the worker is live
-      # and bound to this route, not a Cloudflare 522/1016 for an unbound one.
-      - name: Verify the deployed route responds
-        run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' https://numberbroom.com/mcp)
-          test "$code" = "405" || { echo "expected 405, got $code"; exit 1; }
-
-      # A browser asking for HTML is not an MCP client and gets the setup page
-      # on numberbroom.com instead of the 405 -- see wantsHtml() in src/index.ts.
+      # The routes in wrangler.jsonc are the lines here that matter in
+      # production: a wrong pattern fails to bind or, worse, shadows something
+      # else on numberbroom.com. Each check is retried, because a new version
+      # takes seconds to reach the edge (2026-09-14, cee4ca7: a check ~1s after
+      # wrangler returned saw the previous version and failed a live deploy).
       #
-      # Retried, because a new version takes seconds to reach the edge. The
-      # first run of this check (2026-09-14, cee4ca7) fired ~1s after wrangler
-      # returned, got the previous version's plain 405 and an empty redirect,
-      # and failed a deploy that was in fact live a moment later. The 405 check
-      # above cannot see this race: old and new code both answer 405 there.
-      - name: Verify a browser is sent to the setup page
+      # Since 1.1.0 (OAuth) a bare GET on /mcp is the provider's 401 challenge,
+      # naming the protected-resource document, where it used to be a 405. That
+      # is the signal the new version is live and bound.
+      - name: Verify the deployed routes respond
         run: |
-          for i in $(seq 1 12); do
-            loc=$(curl -s -o /dev/null -w '%{redirect_url}' -H 'Accept: text/html' https://numberbroom.com/mcp)
-            if [ "$loc" = "https://numberbroom.com/mcp-server" ]; then
-              echo "redirect live after attempt $i"; exit 0
-            fi
-            echo "attempt $i: got '$loc', waiting for the new version to propagate"
-            sleep 5
-          done
-          echo "expected redirect to /mcp-server after 60s, last got '$loc'"; exit 1
+          check() {
+            for i in $(seq 1 12); do
+              if eval "$1"; then echo "ok: $2 (attempt $i)"; return 0; fi
+              echo "attempt $i: $2 not yet, waiting for the new version to propagate"
+              sleep 5
+            done
+            echo "FAILED after 60s: $2"; return 1
+          }
+          check "curl -s -D - -o /dev/null https://numberbroom.com/mcp | tr -d '\r' | grep -qi '^www-authenticate:.*resource_metadata=\"https://numberbroom.com/.well-known/oauth-protected-resource/mcp\"'" \
+            "bare GET /mcp answers the OAuth challenge"
+          check "test \"\$(curl -s -o /dev/null -w '%{redirect_url}' -H 'Accept: text/html' https://numberbroom.com/mcp)\" = https://numberbroom.com/mcp-server" \
+            "a browser on /mcp is sent to the setup page"
+          check "curl -s https://numberbroom.com/.well-known/oauth-protected-resource/mcp | grep -q '\"resource\":\"https://numberbroom.com/mcp\"'" \
+            "the protected-resource document names https://numberbroom.com/mcp"
+          check "curl -s https://numberbroom.com/.well-known/oauth-authorization-server | grep -q '\"authorization_endpoint\":\"https://numberbroom.com/oauth/authorize\"'" \
+            "authorization-server metadata is served"
+          # The new routes must not shadow the agent discovery files Firebase serves.
+          check "test \"\$(curl -s -o /dev/null -w '%{http_code}' https://numberbroom.com/.well-known/api-catalog)\" = 200" \
+            "Firebase /.well-known/api-catalog still answers"
+          check "test \"\$(curl -s -o /dev/null -w '%{http_code}' https://numberbroom.com/.well-known/mcp/server-card.json)\" = 200" \
+            "Firebase /.well-known/mcp/server-card.json still answers"

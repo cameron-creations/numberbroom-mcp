@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import worker, { verifyPhoneNumber, getCreditBalance, wantsHtml, DOCS_URL, CLIENT_HEADER } from "../src/index";
+import worker, {
+  verifyPhoneNumber,
+  getCreditBalance,
+  buyCredits,
+  scrubList,
+  getListStatus,
+  wantsHtml,
+  DOCS_URL,
+  CLIENT_HEADER,
+} from "../src/index";
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import { env } from "cloudflare:test";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -22,7 +32,7 @@ describe("verifyPhoneNumber", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.isError).toBe(true);
-    expect(textAt(result)).toContain("No NumberBroom API key");
+    expect(textAt(result)).toContain("no NumberBroom account");
   });
 
   it("forwards the Authorization header and phone number to /v1/verify", async () => {
@@ -50,14 +60,11 @@ describe("verifyPhoneNumber", () => {
 
     const result = await verifyPhoneNumber("Bearer nb_live_test", "5551234567");
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://numberbroom.com/api/v1/verify",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({ authorization: "Bearer nb_live_test" }),
-        body: JSON.stringify({ phone: "5551234567" }),
-      })
-    );
+    const [url, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0];
+    expect(url).toBe("https://numberbroom.com/api/v1/verify");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer nb_live_test");
+    expect(init.body).toBe(JSON.stringify({ phone: "5551234567" }));
     expect(result.isError).toBeUndefined();
     expect(textAt(result)).toContain("mobile on Verizon Wireless");
     expect(textAt(result)).not.toContain("disconnected");
@@ -184,11 +191,10 @@ describe("getCreditBalance", () => {
 
     const result = await getCreditBalance("Bearer nb_live_test");
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://numberbroom.com/api/v1/credits",
-      expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer nb_live_test" }) })
-    );
-    expect(textAt(result)).toBe("$24.8 remaining — enough for about 124 lookups at $0.2 each.");
+    const [url, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0];
+    expect(url).toBe("https://numberbroom.com/api/v1/credits");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer nb_live_test");
+    expect(textAt(result)).toBe("$24.8 remaining -- enough for about 124 lookups at $0.2 each.");
   });
 
   it("surfaces an upstream error response as an MCP tool error", async () => {
@@ -216,7 +222,7 @@ describe("browser GET on /mcp", () => {
   it("sends a browser (Accept: text/html) to the setup page", async () => {
     const res = await worker.fetch(
       new Request(url, { headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } }),
-      {},
+      env,
       ctx
     );
     expect(res.status).toBe(302);
@@ -236,10 +242,21 @@ describe("browser GET on /mcp", () => {
     ).toBe(false);
   });
 
-  it("keeps the bare GET (curl's Accept: */*) on the MCP handler, which deploy.yml checks for 405", async () => {
-    const res = await worker.fetch(new Request(url, { headers: { accept: "*/*" } }), {}, ctx);
-    expect(res.status).not.toBe(302);
-    expect(res.status).toBe(405);
+  it("answers a bare GET (curl's Accept: */*) with the OAuth challenge deploy.yml checks for", async () => {
+    const res = await worker.fetch(new Request(url, { headers: { accept: "*/*" } }), env, ctx);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain(
+      'resource_metadata="https://numberbroom.com/.well-known/oauth-protected-resource/mcp"'
+    );
+  });
+
+  it("does not send the OAuth pages to the setup page, though a browser asks for them", async () => {
+    const res = await worker.fetch(
+      new Request("https://numberbroom.com/oauth/callback", { headers: { accept: "text/html" } }),
+      env,
+      ctx
+    );
+    expect(res.headers.get("location")).not.toBe(DOCS_URL);
   });
 });
 
@@ -293,8 +310,68 @@ describe("calls identify themselves as MCP", () => {
     await getCreditBalance("Bearer nb_live_test");
     await verifyPhoneNumber("Bearer nb_live_test", "5551234567");
     for (const call of fetchMock.mock.calls as unknown as [string, RequestInit][]) {
-      expect((call[1].headers as Record<string, string>)[CLIENT_HEADER]).toBe("mcp");
+      expect(new Headers(call[1].headers).get(CLIENT_HEADER)).toBe("mcp");
+      expect(new Headers(call[1].headers).get("user-agent")).toMatch(/^NumberBroom-MCP\//);
     }
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("buying tools", () => {
+  const ok = (body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+  const sent = (m: ReturnType<typeof vi.fn>) => (m.mock.calls as unknown as [string, RequestInit][])[0];
+
+  it("buy_credits asks /v1/credits/checkout for that amount and hands back the link", async () => {
+    const m = ok({ url: "https://checkout.stripe.com/c/pay/x", sessionId: "cs_1" });
+    vi.stubGlobal("fetch", m);
+    const result = await buyCredits("Bearer nb_live_test", 25);
+    const [url, init] = sent(m);
+    expect(url).toBe("https://numberbroom.com/api/v1/credits/checkout");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ amount: 25 });
+    expect(textAt(result)).toContain("https://checkout.stripe.com/c/pay/x");
+  });
+
+  it("scrub_list sends the numbers and mode to /v1/lists and reports price, link and job", async () => {
+    const m = ok({ jobId: "job-1234", url: "https://checkout.stripe.com/c/pay/y", rowCount: 31, chargedNumbers: 30, amount: 6, scrubMode: "litigator_only" });
+    vi.stubGlobal("fetch", m);
+    const result = await scrubList("Bearer nb_live_test", ["4155553000"], "litigator_only");
+    const [url, init] = sent(m);
+    expect(url).toBe("https://numberbroom.com/api/v1/lists");
+    expect(JSON.parse(String(init.body))).toEqual({ numbers: ["4155553000"], scrubMode: "litigator_only" });
+    expect(textAt(result)).toContain("$6");
+    expect(textAt(result)).toContain("job-1234");
+    expect(textAt(result)).toContain("https://checkout.stripe.com/c/pay/y");
+  });
+
+  it("get_list_status reads /v1/lists/:jobId and passes on the hour-long download link", async () => {
+    const m = ok({ jobId: "job-1234", status: "complete", paid: true, totalNumbers: 31, cleanCount: 20, litigatorCount: 2, voipLandlineCount: 5, disconnectedCount: 3, downloadUrl: "https://numberbroom.com/api/download/job-1234?token=t" });
+    vi.stubGlobal("fetch", m);
+    const result = await getListStatus("Bearer nb_live_test", "job-1234");
+    expect(sent(m)[0]).toBe("https://numberbroom.com/api/v1/lists/job-1234");
+    expect(textAt(result)).toContain("20 kept of 31");
+    expect(textAt(result)).toContain("/api/download/job-1234?token=t");
+  });
+
+  it("an unpaid list says it is waiting for payment", async () => {
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", status: "awaiting_payment", paid: false }));
+    expect(textAt(await getListStatus("Bearer nb_live_test", "job-1234"))).toContain("Not paid yet");
+  });
+
+  it("out of credit points the agent at buy_credits", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "insufficient_credits", message: "Not enough API credits. Top up to continue." }), { status: 402 })));
+    const result = await verifyPhoneNumber("Bearer nb_live_test", "4155553000");
+    expect(result.isError).toBe(true);
+    expect(textAt(result)).toContain("buy_credits");
+  });
+
+  it("the API's own 401 tells the caller the key is gone; a 401 page from anywhere else does not", async () => {
+    let revoked = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "unauthorized", message: "Invalid or revoked API key." }), { status: 401 })));
+    await getCreditBalance("Bearer nb_live_test", () => revoked++);
+    expect(revoked).toBe(1);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>401</html>", { status: 401 })));
+    await getCreditBalance("Bearer nb_live_test", () => revoked++);
+    expect(revoked).toBe(1);
   });
 });

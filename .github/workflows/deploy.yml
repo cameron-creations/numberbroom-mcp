@@ -92,6 +92,13 @@ jobs:
             "the protected-resource document names https://numberbroom.com/mcp"
           check "curl -s https://numberbroom.com/.well-known/oauth-authorization-server | grep -q '\"authorization_endpoint\":\"https://numberbroom.com/oauth/authorize\"'" \
             "authorization-server metadata is served"
+          # A browser reaches the OAuth pages with a query string, which a route
+          # without a trailing * does not match (2026-10-05). The Worker's own
+          # "start again" page, not Firebase's 404, proves the route caught it.
+          check "curl -s 'https://numberbroom.com/oauth/authorize?smoke=1' | grep -q '<title>Connect NumberBroom</title>'" \
+            "/oauth/authorize with a query string reaches the Worker"
+          check "curl -s -X POST 'https://numberbroom.com/oauth/callback?state=smoke' | grep -q '<title>Connect NumberBroom</title>'" \
+            "/oauth/callback with a query string reaches the Worker"
           # The new routes must not shadow the agent discovery files Firebase serves.
           check "test \"\$(curl -s -o /dev/null -w '%{http_code}' https://numberbroom.com/.well-known/api-catalog)\" = 200" \
             "Firebase /.well-known/api-catalog still answers"

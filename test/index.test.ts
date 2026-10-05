@@ -150,6 +150,27 @@ describe("verifyPhoneNumber", () => {
     expect(textAt(result)).toBe('"abc" is not a parsable US phone number. Not charged.');
   });
 
+  it.each([
+    ["(416) 392-2489", "+14163922489", "outside_us", "A +1 number outside the US (such as Canada, Puerto Rico or the Caribbean). The litigator check covers US numbers only. Not charged."],
+    ["+44 20 7946 0958", "+442079460958", "not_nanp", "Not a US number. The litigator check covers US numbers only. Not charged."],
+  ])("passes the API's reason through for a real number it answers without a lookup (%s)", async (phone, e164, reason, message) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ phone, e164, valid: false, outcome: "invalid", keep: false, reason, charged: 0, message }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const result = await verifyPhoneNumber("Bearer nb_live_test", phone);
+
+    expect(result.isError).toBeUndefined();
+    expect(textAt(result)).toBe(`"${phone}": ${message}`);
+    expect(textAt(result)).not.toContain("not a parsable");
+  });
+
   it("surfaces an upstream error response as an MCP tool error", async () => {
     vi.stubGlobal(
       "fetch",

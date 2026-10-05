@@ -229,7 +229,14 @@ export async function verifyPhoneNumber(
         // an agent reads first calls a dead line a plain mobile.
         d.isLikelyDisconnected === true ? `, likely disconnected (activity score ${d.activityScore})` : ""
       }${d.isLitigator ? " -- FLAGGED as a known TCPA litigator" : ""}. Charged $${d.charged}.`
-    : `"${phone}" is not a parsable US phone number. Not charged.`;
+    : // The API says why it answered without a lookup. "unparseable" keeps the
+      // wording agents already see; any other reason ("outside_us" for a
+      // Canadian, Puerto Rico or Caribbean number, "not_nanp" for an overseas
+      // one) is a real number, so calling it unparseable would be wrong. The
+      // API's own message names the reason.
+      d.reason && d.reason !== "unparseable" && typeof d.message === "string"
+      ? `"${phone}": ${d.message}`
+      : `"${phone}" is not a parsable US phone number. Not charged.`;
   return jsonResult(summary, d);
 }
 
@@ -300,7 +307,8 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
         "(a dead mobile still reports as mobile, so read isLikelyDisconnected, not lineType), " +
         "and whether the number is a known TCPA litigator. Does not check Do Not Call " +
         "registries. Costs $0.20, charged against the connected NumberBroom account's " +
-        "pre-paid credit; a number that fails to parse as a phone number is not charged.",
+        "pre-paid credit. A number that fails to parse, or one outside the US (Canada, Puerto " +
+        "Rico, the Caribbean, overseas), is answered without a lookup and not charged.",
       inputSchema: {
         phone: z
           .string()
@@ -349,7 +357,8 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
         "file. Returns the price and a Stripe Checkout link for the person to pay by card; " +
         "nothing is taken from API credit and nothing runs until they pay. mode 'full' removes " +
         "known TCPA litigators, disconnected lines and anything that is not a live mobile; " +
-        "'litigator_only' removes litigators and keeps landlines and VoIP.",
+        "'litigator_only' removes litigators and keeps landlines and VoIP. Numbers outside the US " +
+        "(Canada, Puerto Rico, the Caribbean) are left out of the price and the file.",
       inputSchema: {
         numbers: z
           .array(z.string().min(1).max(40))

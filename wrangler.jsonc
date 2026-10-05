@@ -20,17 +20,21 @@
   // Mode when this was set (2026-10-04); Browser Integrity Check is on, which
   // is why every upstream call names USER_AGENT.
   "compatibility_flags": ["global_fetch_strictly_public"],
-  // Exact routes only. A /.well-known/* wildcard would swallow the agent
+  // Exact routes, plus a trailing * on the two pages a browser reaches with a
+  // query string. A route with no wildcard matches the bare path only: on
+  // 2026-10-05 /oauth/authorize?... and /oauth/callback?state=... fell through
+  // to Firebase's 404 while the bare paths reached this Worker. The * can only
+  // catch paths that start with those prefixes, which Firebase serves nothing
+  // under. Never a /.well-known/* wildcard: it would swallow the agent
   // discovery files Firebase serves (api-catalog, mcp/server-card.json,
-  // agent-skills), and anything under /oauth/* that is not listed here does
-  // not exist. Revocation is served on the token endpoint, so there is no
+  // agent-skills). Revocation is served on the token endpoint, so there is no
   // /oauth/revoke, and there is no registration endpoint (CIMD only).
   "routes": [
     { "pattern": "numberbroom.com/mcp", "zone_name": "numberbroom.com" },
     { "pattern": "numberbroom.com/.well-known/oauth-protected-resource/mcp", "zone_name": "numberbroom.com" },
     { "pattern": "numberbroom.com/.well-known/oauth-authorization-server", "zone_name": "numberbroom.com" },
-    { "pattern": "numberbroom.com/oauth/authorize", "zone_name": "numberbroom.com" },
-    { "pattern": "numberbroom.com/oauth/callback", "zone_name": "numberbroom.com" },
+    { "pattern": "numberbroom.com/oauth/authorize*", "zone_name": "numberbroom.com" },
+    { "pattern": "numberbroom.com/oauth/callback*", "zone_name": "numberbroom.com" },
     { "pattern": "numberbroom.com/oauth/token", "zone_name": "numberbroom.com" }
   ],
   // Grants, tokens and in-flight consent for @cloudflare/workers-oauth-provider.

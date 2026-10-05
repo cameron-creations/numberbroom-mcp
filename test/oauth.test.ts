@@ -331,6 +331,21 @@ describe("connecting", () => {
   });
 });
 
+describe("stray requests to the OAuth pages", () => {
+  it("a bare POST to /oauth/callback, or an authorize URL missing its parameters, gets the start-again page", async () => {
+    stubFetch({ seen: [] });
+    for (const req of [
+      new Request(`${SITE}/oauth/callback?state=smoke`, { method: "POST" }),
+      new Request(`${SITE}/oauth/authorize?smoke=1`),
+      new Request(`${SITE}/oauth/authorize`, { method: "POST" }),
+    ]) {
+      const res = await call(req);
+      expect(res.status, req.url).toBe(400);
+      expect(await res.text()).toContain("<title>Connect NumberBroom</title>");
+    }
+  });
+});
+
 describe("a NumberBroom API key in the header", () => {
   it("still works, and is what the API receives", async () => {
     const upstream: Upstream = { seen: [] };

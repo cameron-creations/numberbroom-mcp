@@ -142,7 +142,7 @@ async function readJson(resp: Response): Promise<unknown> {
   }
 }
 
-function errorResult(status: number, data: unknown): CallToolResult {
+function errorResult(status: number, data: unknown, oauth = false): CallToolResult {
   const message =
     (typeof data === "object" && data !== null && "message" in data && String((data as any).message)) ||
     (typeof data === "object" && data !== null && "error" in data && String((data as any).error)) ||
@@ -151,7 +151,9 @@ function errorResult(status: number, data: unknown): CallToolResult {
     status === 402
       ? " Call buy_credits to get a link the person can use to add credit."
       : status === 401
-        ? " This connection's access was revoked; connect NumberBroom again from the assistant's settings."
+        ? oauth
+          ? " This connection was disconnected; connect NumberBroom again from the assistant's settings."
+          : " Check the API key in this connection's Authorization header (keys are in NumberBroom's Settings)."
         : "";
   return {
     isError: true,
@@ -194,7 +196,9 @@ async function callApi(
   }
   if (!resp.ok) {
     if (onRevoked && isRevoked(resp.status, data)) onRevoked();
-    return { ok: false, result: errorResult(resp.status, data) };
+    // onRevoked is passed only for an OAuth connection, so it also says which
+    // advice fits a 401: reconnect, or fix the header key.
+    return { ok: false, result: errorResult(resp.status, data, Boolean(onRevoked)) };
   }
   return { ok: true, data: data as Record<string, unknown> };
 }
@@ -498,9 +502,14 @@ async function authorizeGet(request: Request, env: Env): Promise<Response> {
   return page(`Allow ${details.clientName}?`, consentHtml(details, consent.handle), 200, consent.headers);
 }
 
+/** The posted form, or an empty one when the body is missing or not a form. */
+async function formOf(request: Request): Promise<FormData> {
+  return request.formData().catch(() => new FormData());
+}
+
 async function authorizePost(request: Request, env: Env): Promise<Response> {
   const oauth = env.OAUTH_PROVIDER;
-  const form = await request.formData();
+  const form = await formOf(request);
   const handle = String(form.get("handle") || "");
   if (form.get("decision") !== "approve") {
     const denied = await oauth.denyConsent(request, handle);
@@ -526,7 +535,7 @@ interface UpstreamData {
 
 async function callback(request: Request, env: Env): Promise<Response> {
   const oauth = env.OAUTH_PROVIDER;
-  const form = await request.formData();
+  const form = await formOf(request);
   const code = String(form.get("code") || "");
   const state = new URL(request.url).searchParams.get("state") || "";
   const { request: original, data, headers } = await oauth.finishUpstream<UpstreamData>(request);

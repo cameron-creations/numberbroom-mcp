@@ -365,6 +365,15 @@ describe("buying tools", () => {
     expect(textAt(result)).toContain("buy_credits");
   });
 
+  it("a 401 on a header key says to check the key, not that a connection was disconnected", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "unauthorized", message: "Invalid or revoked API key." }), { status: 401 })));
+    const header = textAt(await getCreditBalance("Bearer nb_live_test"));
+    expect(header).toContain("Authorization header");
+    expect(header).not.toContain("disconnected");
+    const oauth = textAt(await getCreditBalance("Bearer nb_live_test", () => {}));
+    expect(oauth).toContain("disconnected");
+  });
+
   it("the API's own 401 tells the caller the key is gone; a 401 page from anywhere else does not", async () => {
     let revoked = 0;
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "unauthorized", message: "Invalid or revoked API key." }), { status: 401 })));

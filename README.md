@@ -17,7 +17,7 @@ for the REST API this wraps.
 | `get_credit_balance` | Remaining pre-paid credit on your NumberBroom account. | Free. |
 | `buy_credits` | A Stripe Checkout link that adds credit to the account. | Free to call; the person pays on Stripe. |
 | `scrub_list` | Sends a whole list (up to 10,000 numbers) for NumberBroom's paid list scrub and returns the price and a Stripe Checkout link. | Free to call; the person pays per list by card. |
-| `get_list_status` | Status and counts for a list scrub, with a one-hour download link once it is done. | Free. |
+| `get_list_status` | Status and counts for a list scrub, with one-hour download links once it is done: the cleaned file, and the rows of any numbers outside the US, which are not scrubbed or charged. | Free. |
 
 ## Connect a client
 

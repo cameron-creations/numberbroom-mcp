@@ -269,10 +269,18 @@ export async function scrubList(
   const r = await callApi(authHeader, "/lists", postJson({ numbers, scrubMode }), onRevoked);
   if (!r.ok) return r.result;
   const d = r.data;
+  // Numbers outside the US are never priced or scrubbed; the API counts them
+  // (outsideUsRows) and returns their rows as a file once the scrub is done.
+  const outside =
+    Number(d.outsideUsRows) > 0
+      ? ` ${d.outsideUsRows} ${d.outsideUsRows === 1 ? "number is" : "numbers are"} outside the US: not priced or ` +
+        `scrubbed, and returned in a file of their own when the scrub is done.`
+      : "";
   return jsonResult(
     `${d.rowCount} numbers (${d.chargedNumbers} charged, repeats once) cost $${d.amount} at list rates. ` +
       `Give the person this link to pay by card: ${d.url} -- the scrub runs once payment clears. ` +
-      `Check it with get_list_status and jobId ${d.jobId}.`,
+      `Check it with get_list_status and jobId ${d.jobId}.` +
+      outside,
     d
   );
 }
@@ -284,8 +292,16 @@ export async function getListStatus(authHeader: string | null, jobId: string, on
   const summary =
     d.status === "complete"
       ? `Done: ${d.cleanCount} kept of ${d.totalNumbers}; ${d.litigatorCount} litigators, ${d.voipLandlineCount} ` +
-        `landline or VoIP, ${d.disconnectedCount} disconnected removed.` +
-        (d.downloadUrl ? ` Cleaned file (link lasts an hour): ${d.downloadUrl}` : "")
+        `landline or VoIP, ${d.disconnectedCount} disconnected` +
+        (typeof d.invalidCount === "number" ? `, ${d.invalidCount} not valid` : "") +
+        ` removed.` +
+        (d.downloadUrl ? ` Cleaned file (link lasts an hour): ${d.downloadUrl}` : "") +
+        (Number(d.outsideUsRows) > 0
+          ? ` ${d.outsideUsRows} ${d.outsideUsRows === 1 ? "number was" : "numbers were"} outside the US, so not ` +
+            `scrubbed or charged` +
+            (d.outsideUsDownloadUrl ? `; their rows (link lasts an hour): ${d.outsideUsDownloadUrl}` : "") +
+            "."
+          : "")
       : d.paid
         ? `Status: ${d.status}. Paid; the scrub is running.`
         : "Not paid yet. The scrub starts once the person pays at the checkout link.";

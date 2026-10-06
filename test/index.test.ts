@@ -374,6 +374,28 @@ describe("buying tools", () => {
     expect(textAt(result)).toContain("/api/download/job-1234?token=t");
   });
 
+  it("scrub_list says how many numbers are outside the US and that they are not priced", async () => {
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", url: "https://checkout.stripe.com/c/pay/y", rowCount: 30, chargedNumbers: 30, outsideUsRows: 2, amount: 6, scrubMode: "full" }));
+    expect(textAt(await scrubList("Bearer nb_live_test", ["4155553000"], "full"))).toContain("2 numbers are outside the US: not priced or scrubbed");
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", url: "u", rowCount: 30, chargedNumbers: 30, outsideUsRows: 0, amount: 6, scrubMode: "full" }));
+    expect(textAt(await scrubList("Bearer nb_live_test", ["4155553000"], "full"))).not.toContain("outside the US");
+  });
+
+  it("get_list_status passes on the file of numbers outside the US, and the invalid count", async () => {
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", status: "complete", paid: true, totalNumbers: 31, cleanCount: 20, litigatorCount: 2, voipLandlineCount: 5, disconnectedCount: 2, invalidCount: 1, outsideUsRows: 3, downloadUrl: "https://numberbroom.com/api/download/job-1234?token=t", outsideUsDownloadUrl: "https://numberbroom.com/api/download/job-1234?token=t&type=outside_us" }));
+    const text = textAt(await getListStatus("Bearer nb_live_test", "job-1234"));
+    expect(text).toContain("1 not valid removed");
+    expect(text).toContain("3 numbers were outside the US, so not scrubbed or charged");
+    expect(text).toContain("type=outside_us");
+  });
+
+  it("an older list with no such counts reads as before", async () => {
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", status: "complete", paid: true, totalNumbers: 31, cleanCount: 20, litigatorCount: 2, voipLandlineCount: 5, disconnectedCount: 3, downloadUrl: "https://numberbroom.com/api/download/job-1234?token=t" }));
+    const text = textAt(await getListStatus("Bearer nb_live_test", "job-1234"));
+    expect(text).not.toContain("not valid");
+    expect(text).not.toContain("outside the US");
+  });
+
   it("an unpaid list says it is waiting for payment", async () => {
     vi.stubGlobal("fetch", ok({ jobId: "job-1234", status: "awaiting_payment", paid: false }));
     expect(textAt(await getListStatus("Bearer nb_live_test", "job-1234"))).toContain("Not paid yet");

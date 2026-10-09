@@ -218,6 +218,25 @@ describe("getCreditBalance", () => {
     expect(textAt(result)).toBe("$24.8 remaining -- enough for about 124 lookups at $0.2 each.");
   });
 
+  it("says AWS pays, and asks for no credit, when the account is billed through AWS Marketplace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ credits: 0, ratePerLookup: 0.2, lookupsRemaining: null, billing: "aws_marketplace" }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const text = textAt(await getCreditBalance("Bearer nb_live_test"));
+
+    expect(text).toBe(
+      "Lookups on this account are billed to its AWS account through AWS Marketplace, at $0.2 each. No credit is needed."
+    );
+    expect(text).not.toMatch(/null/);
+  });
+
   it("surfaces an upstream error response as an MCP tool error", async () => {
     vi.stubGlobal(
       "fetch",

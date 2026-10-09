@@ -244,6 +244,15 @@ export async function getCreditBalance(authHeader: string | null, onRevoked?: ()
   const r = await callApi(authHeader, "/credits", {}, onRevoked);
   if (!r.ok) return r.result;
   const d = r.data;
+  // An account billed through AWS Marketplace pays for lookups on its AWS
+  // invoice, never from credit: the API answers lookupsRemaining null for it,
+  // and telling the person to top up would sell credit nothing ever spends.
+  if (d.billing === "aws_marketplace") {
+    return jsonResult(
+      `Lookups on this account are billed to its AWS account through AWS Marketplace, at $${d.ratePerLookup} each. No credit is needed.`,
+      d
+    );
+  }
   return jsonResult(
     `$${d.credits} remaining -- enough for about ${d.lookupsRemaining} lookups at $${d.ratePerLookup} each.`,
     d

@@ -150,6 +150,27 @@ describe("verifyPhoneNumber", () => {
     expect(textAt(result)).toBe('"abc" is not a parsable US phone number. Not charged.');
   });
 
+  it.each([
+    ["(416) 392-2489", "+14163922489", "outside_us", "A +1 number outside the US (such as Canada, Puerto Rico or the Caribbean). The litigator check covers US numbers only. Not charged."],
+    ["+44 20 7946 0958", "+442079460958", "not_nanp", "Not a US number. The litigator check covers US numbers only. Not charged."],
+  ])("passes the API's reason through for a real number it answers without a lookup (%s)", async (phone, e164, reason, message) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ phone, e164, valid: false, outcome: "invalid", keep: false, reason, charged: 0, message }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const result = await verifyPhoneNumber("Bearer nb_live_test", phone);
+
+    expect(result.isError).toBeUndefined();
+    expect(textAt(result)).toBe(`"${phone}": ${message}`);
+    expect(textAt(result)).not.toContain("not a parsable");
+  });
+
   it("surfaces an upstream error response as an MCP tool error", async () => {
     vi.stubGlobal(
       "fetch",
@@ -195,6 +216,25 @@ describe("getCreditBalance", () => {
     expect(url).toBe("https://numberbroom.com/api/v1/credits");
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer nb_live_test");
     expect(textAt(result)).toBe("$24.8 remaining -- enough for about 124 lookups at $0.2 each.");
+  });
+
+  it("says AWS pays, and asks for no credit, when the account is billed through AWS Marketplace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ credits: 0, ratePerLookup: 0.2, lookupsRemaining: null, billing: "aws_marketplace" }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const text = textAt(await getCreditBalance("Bearer nb_live_test"));
+
+    expect(text).toBe(
+      "Lookups on this account are billed to its AWS account through AWS Marketplace, at $0.2 each. No credit is needed."
+    );
+    expect(text).not.toMatch(/null/);
   });
 
   it("surfaces an upstream error response as an MCP tool error", async () => {
@@ -351,6 +391,28 @@ describe("buying tools", () => {
     expect(sent(m)[0]).toBe("https://numberbroom.com/api/v1/lists/job-1234");
     expect(textAt(result)).toContain("20 kept of 31");
     expect(textAt(result)).toContain("/api/download/job-1234?token=t");
+  });
+
+  it("scrub_list says how many numbers are outside the US and that they are not priced", async () => {
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", url: "https://checkout.stripe.com/c/pay/y", rowCount: 30, chargedNumbers: 30, outsideUsRows: 2, amount: 6, scrubMode: "full" }));
+    expect(textAt(await scrubList("Bearer nb_live_test", ["4155553000"], "full"))).toContain("2 numbers are outside the US: not priced or scrubbed");
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", url: "u", rowCount: 30, chargedNumbers: 30, outsideUsRows: 0, amount: 6, scrubMode: "full" }));
+    expect(textAt(await scrubList("Bearer nb_live_test", ["4155553000"], "full"))).not.toContain("outside the US");
+  });
+
+  it("get_list_status passes on the file of numbers outside the US, and the invalid count", async () => {
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", status: "complete", paid: true, totalNumbers: 31, cleanCount: 20, litigatorCount: 2, voipLandlineCount: 5, disconnectedCount: 2, invalidCount: 1, outsideUsRows: 3, downloadUrl: "https://numberbroom.com/api/download/job-1234?token=t", outsideUsDownloadUrl: "https://numberbroom.com/api/download/job-1234?token=t&type=outside_us" }));
+    const text = textAt(await getListStatus("Bearer nb_live_test", "job-1234"));
+    expect(text).toContain("1 not valid removed");
+    expect(text).toContain("3 numbers were outside the US, so not scrubbed or charged");
+    expect(text).toContain("type=outside_us");
+  });
+
+  it("an older list with no such counts reads as before", async () => {
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", status: "complete", paid: true, totalNumbers: 31, cleanCount: 20, litigatorCount: 2, voipLandlineCount: 5, disconnectedCount: 3, downloadUrl: "https://numberbroom.com/api/download/job-1234?token=t" }));
+    const text = textAt(await getListStatus("Bearer nb_live_test", "job-1234"));
+    expect(text).not.toContain("not valid");
+    expect(text).not.toContain("outside the US");
   });
 
   it("an unpaid list says it is waiting for payment", async () => {

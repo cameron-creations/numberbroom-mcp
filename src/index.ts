@@ -229,7 +229,14 @@ export async function verifyPhoneNumber(
         // an agent reads first calls a dead line a plain mobile.
         d.isLikelyDisconnected === true ? `, likely disconnected (activity score ${d.activityScore})` : ""
       }${d.isLitigator ? " -- FLAGGED as a known TCPA litigator" : ""}. Charged $${d.charged}.`
-    : `"${phone}" is not a parsable US phone number. Not charged.`;
+    : // The API says why it answered without a lookup. "unparseable" keeps the
+      // wording agents already see; any other reason ("outside_us" for a
+      // Canadian, Puerto Rico or Caribbean number, "not_nanp" for an overseas
+      // one) is a real number, so calling it unparseable would be wrong. The
+      // API's own message names the reason.
+      d.reason && d.reason !== "unparseable" && typeof d.message === "string"
+      ? `"${phone}": ${d.message}`
+      : `"${phone}" is not a parsable US phone number. Not charged.`;
   return jsonResult(summary, d);
 }
 
@@ -237,6 +244,15 @@ export async function getCreditBalance(authHeader: string | null, onRevoked?: ()
   const r = await callApi(authHeader, "/credits", {}, onRevoked);
   if (!r.ok) return r.result;
   const d = r.data;
+  // An account billed through AWS Marketplace pays for lookups on its AWS
+  // invoice, never from credit: the API answers lookupsRemaining null for it,
+  // and telling the person to top up would sell credit nothing ever spends.
+  if (d.billing === "aws_marketplace") {
+    return jsonResult(
+      `Lookups on this account are billed to its AWS account through AWS Marketplace, at $${d.ratePerLookup} each. No credit is needed.`,
+      d
+    );
+  }
   return jsonResult(
     `$${d.credits} remaining -- enough for about ${d.lookupsRemaining} lookups at $${d.ratePerLookup} each.`,
     d
@@ -262,10 +278,18 @@ export async function scrubList(
   const r = await callApi(authHeader, "/lists", postJson({ numbers, scrubMode }), onRevoked);
   if (!r.ok) return r.result;
   const d = r.data;
+  // Numbers outside the US are never priced or scrubbed; the API counts them
+  // (outsideUsRows) and returns their rows as a file once the scrub is done.
+  const outside =
+    Number(d.outsideUsRows) > 0
+      ? ` ${d.outsideUsRows} ${d.outsideUsRows === 1 ? "number is" : "numbers are"} outside the US: not priced or ` +
+        `scrubbed, and returned in a file of their own when the scrub is done.`
+      : "";
   return jsonResult(
     `${d.rowCount} numbers (${d.chargedNumbers} charged, repeats once) cost $${d.amount} at list rates. ` +
       `Give the person this link to pay by card: ${d.url} -- the scrub runs once payment clears. ` +
-      `Check it with get_list_status and jobId ${d.jobId}.`,
+      `Check it with get_list_status and jobId ${d.jobId}.` +
+      outside,
     d
   );
 }
@@ -277,8 +301,16 @@ export async function getListStatus(authHeader: string | null, jobId: string, on
   const summary =
     d.status === "complete"
       ? `Done: ${d.cleanCount} kept of ${d.totalNumbers}; ${d.litigatorCount} litigators, ${d.voipLandlineCount} ` +
-        `landline or VoIP, ${d.disconnectedCount} disconnected removed.` +
-        (d.downloadUrl ? ` Cleaned file (link lasts an hour): ${d.downloadUrl}` : "")
+        `landline or VoIP, ${d.disconnectedCount} disconnected` +
+        (typeof d.invalidCount === "number" ? `, ${d.invalidCount} not valid` : "") +
+        ` removed.` +
+        (d.downloadUrl ? ` Cleaned file (link lasts an hour): ${d.downloadUrl}` : "") +
+        (Number(d.outsideUsRows) > 0
+          ? ` ${d.outsideUsRows} ${d.outsideUsRows === 1 ? "number was" : "numbers were"} outside the US, so not ` +
+            `scrubbed or charged` +
+            (d.outsideUsDownloadUrl ? `; their rows (link lasts an hour): ${d.outsideUsDownloadUrl}` : "") +
+            "."
+          : "")
       : d.paid
         ? `Status: ${d.status}. Paid; the scrub is running.`
         : "Not paid yet. The scrub starts once the person pays at the checkout link.";
@@ -300,7 +332,8 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
         "(a dead mobile still reports as mobile, so read isLikelyDisconnected, not lineType), " +
         "and whether the number is a known TCPA litigator. Does not check Do Not Call " +
         "registries. Costs $0.20, charged against the connected NumberBroom account's " +
-        "pre-paid credit; a number that fails to parse as a phone number is not charged.",
+        "pre-paid credit. A number that fails to parse, or one outside the US (Canada, Puerto " +
+        "Rico, the Caribbean, overseas), is answered without a lookup and not charged.",
       inputSchema: {
         phone: z
           .string()
@@ -349,7 +382,8 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
         "file. Returns the price and a Stripe Checkout link for the person to pay by card; " +
         "nothing is taken from API credit and nothing runs until they pay. mode 'full' removes " +
         "known TCPA litigators, disconnected lines and anything that is not a live mobile; " +
-        "'litigator_only' removes litigators and keeps landlines and VoIP.",
+        "'litigator_only' removes litigators and keeps landlines and VoIP. Numbers outside the US " +
+        "(Canada, Puerto Rico, the Caribbean) are left out of the price and the file.",
       inputSchema: {
         numbers: z
           .array(z.string().min(1).max(40))

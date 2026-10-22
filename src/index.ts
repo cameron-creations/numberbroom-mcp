@@ -228,7 +228,11 @@ export async function verifyPhoneNumber(
         // own field, derived from the activity score. Without this the summary
         // an agent reads first calls a dead line a plain mobile.
         d.isLikelyDisconnected === true ? `, likely disconnected (activity score ${d.activityScore})` : ""
-      }${d.isLitigator ? " -- FLAGGED as a known TCPA litigator" : ""}. Charged $${d.charged}.`
+      }${
+        // "Known litigator", not "known TCPA litigator": the flag also covers
+        // FDCPA, FCRA and CFPB suits and never says which law (NumberBroom #448).
+        d.isLitigator ? " -- FLAGGED as a known litigator" : ""
+      }. Charged $${d.charged}.`
     : // The API says why it answered without a lookup. "unparseable" keeps the
       // wording agents already see; any other reason ("outside_us" for a
       // Canadian, Puerto Rico or Caribbean number, "not_nanp" for an overseas
@@ -305,6 +309,10 @@ export async function getListStatus(authHeader: string | null, jobId: string, on
         (typeof d.invalidCount === "number" ? `, ${d.invalidCount} not valid` : "") +
         ` removed.` +
         (d.downloadUrl ? ` Cleaned file (link lasts an hour): ${d.downloadUrl}` : "") +
+        // The removed rows each carry their reason; a Do Not Call Registry match
+        // is counted, never listed, so this is not "every removed row".
+        (d.removedDownloadUrl ? ` Removed rows with their reasons (link lasts an hour): ${d.removedDownloadUrl}` : "") +
+        (d.litigatorDownloadUrl ? ` Known litigators alone (link lasts an hour): ${d.litigatorDownloadUrl}` : "") +
         (Number(d.outsideUsRows) > 0
           ? ` ${d.outsideUsRows} ${d.outsideUsRows === 1 ? "number was" : "numbers were"} outside the US, so not ` +
             `scrubbed or charged` +
@@ -330,10 +338,13 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
         "Verify a single US phone number: carrier-level line type (mobile, landline, VoIP, " +
         "toll-free or other), carrier name, an activity score with a likely-disconnected flag " +
         "(a dead mobile still reports as mobile, so read isLikelyDisconnected, not lineType), " +
-        "and whether the number is a known TCPA litigator. Does not check Do Not Call " +
-        "registries. Costs $0.20, charged against the connected NumberBroom account's " +
-        "pre-paid credit. A number that fails to parse, or one outside the US (Canada, Puerto " +
-        "Rico, the Caribbean, overseas), is answered without a lookup and not charged.",
+        "and whether the number belongs to a known litigator. The litigator flag covers numbers " +
+        "tied to TCPA, FDCPA, FCRA and CFPB suits in court filings; it does not say which law, " +
+        "and no database catches every litigator. Does not check Do Not Call registries. Costs " +
+        "$0.20, charged against the connected NumberBroom account's pre-paid credit, or, for an " +
+        "account linked through AWS Marketplace, billed on its AWS invoice with no credit taken. " +
+        "A number that fails to parse, or one outside the US (Canada, Puerto Rico, the " +
+        "Caribbean, overseas), is answered without a lookup and not charged.",
       inputSchema: {
         phone: z
           .string()
@@ -351,7 +362,8 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
     {
       description:
         "Check the remaining pre-paid API credit balance for the connected NumberBroom " +
-        "account. Free to call -- does not spend credits.",
+        "account, or whether its lookups are billed through AWS Marketplace instead. Free to " +
+        "call -- does not spend credits.",
       inputSchema: {},
       annotations: READ_ONLY,
     },
@@ -364,7 +376,8 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
       description:
         "Create a Stripe Checkout link that adds credit to the connected NumberBroom account. " +
         "Free to call; nothing is charged until the person opens the link and pays by card. " +
-        "Use it when a lookup fails for lack of credit, or before a large batch.",
+        "Use it when a lookup fails for lack of credit, or before a large batch. An account " +
+        "billed through AWS Marketplace needs no credit for lookups (get_credit_balance says so).",
       inputSchema: {
         amount: z.number().min(10).max(5000).describe("Dollars of credit to add, 10 to 5000."),
       },
@@ -380,8 +393,9 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
         "Send a whole list of US phone numbers for NumberBroom's paid list scrub, which is " +
         "cheaper per number than one lookup at a time on large lists and returns one cleaned " +
         "file. Returns the price and a Stripe Checkout link for the person to pay by card; " +
-        "nothing is taken from API credit and nothing runs until they pay. mode 'full' removes " +
-        "known TCPA litigators, disconnected lines and anything that is not a live mobile; " +
+        "nothing is taken from API credit or an AWS Marketplace subscription, and nothing runs " +
+        "until they pay. mode 'full' removes known litigators, disconnected lines and anything " +
+        "that is not a live mobile; " +
         "'litigator_only' removes litigators and keeps landlines and VoIP. Numbers outside the US " +
         "(Canada, Puerto Rico, the Caribbean) are left out of the price and the file.",
       inputSchema: {
@@ -402,7 +416,8 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
     {
       description:
         "Check a list scrub started with scrub_list: whether it is paid, running or done, the " +
-        "counts once done, and a download link for the cleaned file that lasts an hour.",
+        "counts once done, and download links that last an hour: the cleaned file, the removed " +
+        "rows with their reasons, and the known litigators alone.",
       inputSchema: {
         jobId: z.string().min(8).max(64).describe("The jobId scrub_list returned."),
       },
@@ -502,7 +517,7 @@ export function consentHtml(d: ConsentDescription, handle: string): string {
       ? `<p class="card warn"><strong>This sends access to an app on your computer.</strong> Continue only if you just started connecting from it.</p>`
       : "") +
     `<p>It will be able to:</p><ul>` +
-    `<li>verify phone numbers, at $0.20 each from your prepaid credit</li>` +
+    `<li>verify phone numbers, at $0.20 each from your prepaid credit, or on your AWS bill if your account is linked through AWS Marketplace</li>` +
     `<li>check your credit balance</li>` +
     `<li>give you links to add credit or to pay for scrubbing a whole list</li></ul>` +
     `<p class="muted">It never sees your card or an API key. Disconnect it any time in Settings.</p>` +

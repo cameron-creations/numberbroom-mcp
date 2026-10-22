@@ -2,7 +2,7 @@
 
 A remote [MCP](https://modelcontextprotocol.io) server that lets AI agents verify US phone numbers
 through the [NumberBroom](https://numberbroom.com) API: carrier-level line type, carrier name, an
-activity score with a likely-disconnected flag, and TCPA litigator status. Agents can also hand
+activity score with a likely-disconnected flag, and known-litigator status. Agents can also hand
 their user a link to add credit, or to pay for scrubbing a whole list.
 
 Every tool call becomes a call to `https://numberbroom.com/api/v1`, which owns rate limiting,
@@ -13,11 +13,11 @@ for the REST API this wraps.
 
 | Tool | Description | Cost |
 |---|---|---|
-| `verify_phone_number` | Line type, carrier, activity score, TCPA litigator flag for one US number. | $0.20/call from your NumberBroom credit. Unparseable numbers and numbers outside the US are not charged. |
-| `get_credit_balance` | Remaining pre-paid credit on your NumberBroom account. | Free. |
+| `verify_phone_number` | Line type, carrier, activity score and a known-litigator flag for one US number. The flag covers numbers tied to TCPA, FDCPA, FCRA and CFPB suits in court filings; it does not say which law, and no database catches every litigator. | $0.20/call from your NumberBroom credit, or on your AWS bill if the account is linked through AWS Marketplace. Unparseable numbers and numbers outside the US are not charged. |
+| `get_credit_balance` | Remaining pre-paid credit on your NumberBroom account, or that its lookups are billed through AWS Marketplace. | Free. |
 | `buy_credits` | A Stripe Checkout link that adds credit to the account. | Free to call; the person pays on Stripe. |
 | `scrub_list` | Sends a whole list (up to 10,000 numbers) for NumberBroom's paid list scrub and returns the price and a Stripe Checkout link. | Free to call; the person pays per list by card. |
-| `get_list_status` | Status and counts for a list scrub, with one-hour download links once it is done: the cleaned file, and the rows of any numbers outside the US, which are not scrubbed or charged. | Free. |
+| `get_list_status` | Status and counts for a list scrub, with one-hour download links once it is done: the cleaned file, the removed rows with their reasons (a Do Not Call Registry match is counted, never listed), the known litigators alone, and the rows of any numbers outside the US, which are not scrubbed or charged. | Free. |
 
 ## Connect a client
 

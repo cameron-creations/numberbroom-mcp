@@ -8,6 +8,7 @@ import worker, {
   wantsHtml,
   DOCS_URL,
   CLIENT_HEADER,
+  createServer,
 } from "../src/index";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { env } from "cloudflare:test";
@@ -100,7 +101,7 @@ describe("verifyPhoneNumber", () => {
     expect(textAt(result)).toContain("mobile on Verizon Wireless, likely disconnected (activity score 12)");
   });
 
-  it("flags a known TCPA litigator in the summary", async () => {
+  it("flags a known litigator in the summary, without calling it TCPA", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -122,7 +123,9 @@ describe("verifyPhoneNumber", () => {
 
     const result = await verifyPhoneNumber("Bearer nb_live_test", "5551234567");
 
-    expect(textAt(result)).toContain("FLAGGED as a known TCPA litigator");
+    // The flag also covers FDCPA, FCRA and CFPB suits and never says which law.
+    expect(textAt(result)).toContain("FLAGGED as a known litigator");
+    expect(textAt(result)).not.toContain("TCPA");
   });
 
   it("reports an unparseable number as a normal (non-error) result", async () => {
@@ -408,11 +411,34 @@ describe("buying tools", () => {
     expect(text).toContain("type=outside_us");
   });
 
+  it("get_list_status passes on the removed rows and the known litigators, each in a file of its own", async () => {
+    vi.stubGlobal("fetch", ok({ jobId: "job-1234", status: "complete", paid: true, totalNumbers: 31, cleanCount: 20, litigatorCount: 2, voipLandlineCount: 5, disconnectedCount: 3, downloadUrl: "https://numberbroom.com/api/download/job-1234?token=t", removedDownloadUrl: "https://numberbroom.com/api/download/job-1234?token=t&type=removed", litigatorDownloadUrl: "https://numberbroom.com/api/download/job-1234?token=t&type=litigators" }));
+    const text = textAt(await getListStatus("Bearer nb_live_test", "job-1234"));
+    expect(text).toContain("Removed rows with their reasons (link lasts an hour): https://numberbroom.com/api/download/job-1234?token=t&type=removed");
+    expect(text).toContain("Known litigators alone (link lasts an hour): https://numberbroom.com/api/download/job-1234?token=t&type=litigators");
+  });
+
   it("an older list with no such counts reads as before", async () => {
     vi.stubGlobal("fetch", ok({ jobId: "job-1234", status: "complete", paid: true, totalNumbers: 31, cleanCount: 20, litigatorCount: 2, voipLandlineCount: 5, disconnectedCount: 3, downloadUrl: "https://numberbroom.com/api/download/job-1234?token=t" }));
     const text = textAt(await getListStatus("Bearer nb_live_test", "job-1234"));
     expect(text).not.toContain("not valid");
     expect(text).not.toContain("outside the US");
+    expect(text).not.toContain("Removed rows");
+    expect(text).not.toContain("Known litigators alone");
+  });
+
+  it("tool descriptions say known litigator with its limit, and who pays", () => {
+    // The descriptions are what an agent reads before it calls a tool, and what it
+    // repeats to the person, so they carry the same claims as NumberBroom's pages.
+    const tools = (createServer(null) as unknown as { _registeredTools: Record<string, { description?: string }> })._registeredTools;
+    const desc = (name: string) => String(tools[name]?.description);
+    for (const name of Object.keys(tools)) expect(desc(name)).not.toMatch(/TCPA litigator/);
+    expect(desc("verify_phone_number")).toContain("TCPA, FDCPA, FCRA and CFPB suits");
+    expect(desc("verify_phone_number")).toContain("no database catches every litigator");
+    expect(desc("verify_phone_number")).toContain("AWS Marketplace");
+    expect(desc("get_credit_balance")).toContain("AWS Marketplace");
+    expect(desc("scrub_list")).toContain("nothing is taken from API credit or an AWS Marketplace subscription");
+    expect(desc("get_list_status")).toContain("the removed rows with their reasons, and the known litigators alone");
   });
 
   it("an unpaid list says it is waiting for payment", async () => {

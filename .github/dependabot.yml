@@ -8,3 +8,18 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # npm security fixes only, as one pull request. Dependabot raises a security
+  # update when an alert appears, whatever the schedule says, and only with
+  # "Dependabot security updates" on in the repository's settings. A schedule is
+  # required here; the limit of 0 turns off routine npm version bumps, so nothing
+  # arrives but a fix. Merging one deploys, like any push to master.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"

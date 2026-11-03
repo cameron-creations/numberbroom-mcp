@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import worker, { consentHtml, RESOURCE, USER_AGENT } from "../src/index";
+import worker, { consentHtml, MAX_REQUEST_BYTES, MAX_TOOL_INPUT_ELEMENTS, RESOURCE, USER_AGENT } from "../src/index";
 
 const SITE = "https://numberbroom.com";
 const CLIENT_ID = "https://client.example/oauth/client-metadata.json";
@@ -360,6 +360,43 @@ describe("a NumberBroom API key in the header", () => {
     stubFetch({ seen: [] });
     const r = await mcpCall("nb_live_short", "verify_phone_number", { phone: "4155553000" });
     expect(r.status).toBe(401);
+  });
+});
+
+describe("an issued token", () => {
+  it("meets the same limits as a header key, and still works inside them", async () => {
+    const upstream: Upstream = { seen: [] };
+    stubFetch(upstream);
+    const { verifier, challenge } = await pkce();
+    const { state, cookie } = await throughConsent(challenge);
+    const done = await call(
+      new Request(`${SITE}/oauth/callback?state=${encodeURIComponent(state)}`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ code: CODE }),
+      })
+    );
+    const authCode = new URL(done.headers.get("location")!).searchParams.get("code")!;
+    const tokens = await (
+      await call(
+        new Request(`${SITE}/oauth/token`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ grant_type: "authorization_code", code: authCode, redirect_uri: REDIRECT, client_id: CLIENT_ID, code_verifier: verifier, resource: RESOURCE }),
+        })
+      )
+    ).json<any>();
+    upstream.seen.length = 0;
+
+    const tooMany = await mcpCall(tokens.access_token, "scrub_list", { numbers: Array(MAX_TOOL_INPUT_ELEMENTS + 1).fill("1") });
+    expect(tooMany.text).toContain(`maximum of ${MAX_TOOL_INPUT_ELEMENTS} elements`);
+    const tooBig = await mcpCall(tokens.access_token, "scrub_list", { numbers: Array(Math.ceil(MAX_REQUEST_BYTES / 40)).fill("1".repeat(40)) });
+    expect(tooBig.status).toBe(413);
+    expect(upstream.seen).toEqual([]);
+
+    const fine = await mcpCall(tokens.access_token, "verify_phone_number", { phone: "4155553000" });
+    expect(fine.status).toBe(200);
+    expect(new Headers(upstream.seen.find((s) => s.url === `${SITE}/api/v1/verify`)!.init.headers).get("authorization")).toBe(`Bearer ${KEY}`);
   });
 });
 

@@ -65,6 +65,22 @@ export const VERSION = "1.1.0";
 export const USER_AGENT = `NumberBroom-MCP/${VERSION} (+${SITE}/mcp-server)`;
 const KEY_RE = /^nb_live_[0-9a-f]{64}$/;
 
+/** The most numbers scrub_list takes in one call, the API's largest list. */
+const MAX_LIST_NUMBERS = 10_000;
+/**
+ * The most array elements and object keys one tool call may carry: a full
+ * scrub_list and its own few keys. Validation cost grows with every element a
+ * request sends, and a header key gets this far on its format alone, before
+ * the API has seen it, so sending a huge list takes no account
+ * (GHSA-46jr-4wx8-v453; the SDK leaves this limit off by default).
+ */
+export const MAX_TOOL_INPUT_ELEMENTS = MAX_LIST_NUMBERS + 10;
+/**
+ * The largest POST /mcp reads. A full scrub_list at the 40 characters a number
+ * may have is about 430 KB, and real numbers are far shorter.
+ */
+export const MAX_REQUEST_BYTES = 512 * 1024;
+
 /**
  * Tells the API a call came through MCP, so a key with no limit of its own
  * gets the lower MCP daily default rather than the full per-key cap (see
@@ -329,7 +345,7 @@ export async function getListStatus(authHeader: string | null, jobId: string, on
 const READ_ONLY = { readOnlyHint: true, openWorldHint: true };
 
 export function createServer(authHeader: string | null, onRevoked?: () => void): McpServer {
-  const server = new McpServer({ name: "numberbroom", version: VERSION });
+  const server = new McpServer({ name: "numberbroom", version: VERSION }, { maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS });
 
   server.registerTool(
     "verify_phone_number",
@@ -402,7 +418,7 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
         numbers: z
           .array(z.string().min(1).max(40))
           .min(1)
-          .max(10000)
+          .max(MAX_LIST_NUMBERS)
           .describe("Up to 10,000 phone numbers, digits and phone punctuation only."),
         mode: z.enum(["full", "litigator_only"]).default("full"),
       },
@@ -432,13 +448,40 @@ export function createServer(authHeader: string | null, onRevoked?: () => void):
 // ─── The MCP endpoint ────────────────────────────────────────────────────────
 
 /**
+ * A POST's body, or null once it passes MAX_REQUEST_BYTES. This is here rather
+ * than createMcpHandler's maxRequestBodySize because agents hands that option
+ * only to the 2026-07-28 lane: its legacy lane, for every earlier protocol
+ * version, would still read the SDK's 4 MiB default. A client can leave
+ * Content-Length off, so the stream is counted as well.
+ */
+async function readBody(request: Request): Promise<ArrayBuffer | null> {
+  if (Number(request.headers.get("content-length")) > MAX_REQUEST_BYTES) return null;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of request.body ?? []) {
+    size += chunk.byteLength;
+    if (size > MAX_REQUEST_BYTES) return null;
+    chunks.push(chunk);
+  }
+  return new Blob(chunks).arrayBuffer();
+}
+
+/**
  * Reached only with a valid token or an accepted header key: the provider
  * answers everything else with a 401 that points at the protected-resource
  * metadata. The key comes from ctx.props directly, not from async storage,
  * because agents' createMcpHandler does not see this library's context.
  */
 export const mcpApi = {
-  fetch(request: Request, env: Env, ctx: ExecutionContext & { props?: Props; auth?: { token?: string } }) {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext & { props?: Props; auth?: { token?: string } }) {
+    if (request.method === "POST") {
+      const body = await readBody(request);
+      if (!body) {
+        const message = `Payload Too Large: Request body must not exceed ${MAX_REQUEST_BYTES} bytes`;
+        return Response.json({ jsonrpc: "2.0", error: { code: -32000, message }, id: null }, { status: 413 });
+      }
+      request = new Request(request, { body });
+    }
     const props = ctx.props;
     const authHeader = props?.apiKey && KEY_RE.test(props.apiKey) ? `Bearer ${props.apiKey}` : null;
     // A key revoked in Settings (Disconnect) answers 401. Revoking the grant
